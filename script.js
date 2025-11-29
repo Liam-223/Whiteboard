@@ -16,6 +16,7 @@ const board = document.getElementById('board');
 const boardContainer = document.getElementById('board-container');
 const connectionsLayer = document.getElementById('connections-layer');
 const drawLayer = document.getElementById('draw-layer');
+const cursorLayer = document.getElementById('cursor-layer');
 
 // Toolbar buttons
 const addNoteBtn = document.getElementById('add-note-btn');
@@ -35,14 +36,12 @@ const gridToggle = document.getElementById('grid-toggle');
 const resetZoomBtn = document.getElementById('reset-zoom-btn');
 const settingsToggleBtn = document.getElementById('settings-toggle-btn');
 const settingsPanel = document.getElementById('settings-panel');
-const coordsIndicator = document.getElementById('coords-indicator');
-
-const showCursorsToggle = document.getElementById('show-cursors-toggle');
+const settingsCloseBtn = document.getElementById('settings-close-btn');
+const usernameInput = document.getElementById('username-input');
 const showUsernamesToggle = document.getElementById('show-usernames-toggle');
-const userCursorColorInput = document.getElementById('user-cursor-color');
-const changeNameBtn = document.getElementById('change-name-btn');
-const currentUsernameEl = document.getElementById('current-username');
-const cursorsLayer = document.getElementById('cursors-layer');
+const showCursorsToggle = document.getElementById('show-cursors-toggle');
+const cursorColorInput = document.getElementById('cursor-color-input');
+const coordsIndicator = document.getElementById('coords-indicator');
 
 // Drawing tools
 const drawModeBtn = document.getElementById('draw-mode-btn');
@@ -101,20 +100,26 @@ let collab = {
   boardDocRef: null,
   boardId: null,
   lastLocalUpdate: 0,
-  isApplyingRemote: false,
-  // live cursors / presence
-  presenceRef: null,
-  otherUsers: {},
-  userId: null,
-  userName: null,
-  userColor: null,
-  lastPresenceWrite: 0
+  isApplyingRemote: false
 };
 
-// User identity (per board) for presence + settings
-let userIdentity = null;
-const PRESENCE_THROTTLE_MS = 80;
-const PRESENCE_STALE_MS = 30000;
+// Live cursor / user presence
+let userIdentity = {
+  id: null,
+  name: null,
+  color: '#f97316',
+  showCursors: true,
+  showUsernames: true
+};
+
+let cursorPresence = {
+  docRef: null,
+  unsubscribe: null
+};
+
+const remoteCursors = new Map();
+let lastCursorSendTime = 0;
+
 
 // ------------------------------------------------------
 // Helpers
@@ -1006,210 +1011,6 @@ clearBoardBtn.addEventListener('click', () => {
   autoSaveToLocalStorage();
 });
 
-
-// ------------------------------------------------------
-// User identity & live cursor helpers
-// ------------------------------------------------------
-function getUserStorageKey(boardId) {
-  return 'simple_whiteboard_user_' + boardId;
-}
-
-function ensureUserIdentity(boardId) {
-  if (userIdentity) return userIdentity;
-
-  const key = getUserStorageKey(boardId);
-  let stored = null;
-
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) {
-      stored = JSON.parse(raw);
-    }
-  } catch (err) {
-    console.error('Error reading stored user identity', err);
-  }
-
-  if (!stored || !stored.id) {
-    const randomId = Math.random().toString(36).slice(2, 10);
-    let name = prompt('Choose a name for yourself on this board:', '') || '';
-    name = name.trim();
-    if (!name) {
-      name = 'Guest-' + randomId.slice(0, 4);
-    }
-
-    const palette = ['#22c55e', '#3b82f6', '#f97316', '#ec4899', '#a855f7', '#0ea5e9'];
-    const color = palette[Math.floor(Math.random() * palette.length)];
-
-    stored = {
-      id: randomId,
-      name,
-      color
-    };
-  }
-
-  userIdentity = stored;
-  collab.userId = stored.id;
-  collab.userName = stored.name;
-  collab.userColor = stored.color;
-
-  // Update UI if present
-  if (currentUsernameEl) {
-    currentUsernameEl.textContent = stored.name;
-  }
-  if (userCursorColorInput) {
-    userCursorColorInput.value = stored.color || '#22c55e';
-  }
-
-  try {
-    localStorage.setItem(key, JSON.stringify(stored));
-  } catch (err) {
-    console.error('Error saving user identity', err);
-  }
-
-  return stored;
-}
-
-function persistUserIdentity(boardId) {
-  if (!userIdentity) return;
-  const key = getUserStorageKey(boardId);
-  try {
-    localStorage.setItem(key, JSON.stringify(userIdentity));
-  } catch (err) {
-    console.error('Error saving user identity', err);
-  }
-}
-
-function updateUserNameOnBoard(newName) {
-  if (!newName) return;
-  const trimmed = newName.trim();
-  if (!trimmed) return;
-
-  const boardId = collab.boardId || getOrCreateBoardId();
-  ensureUserIdentity(boardId);
-
-  userIdentity.name = trimmed;
-  collab.userName = trimmed;
-  if (currentUsernameEl) {
-    currentUsernameEl.textContent = trimmed;
-  }
-  persistUserIdentity(boardId);
-  updatePresencePosition();
-}
-
-function updateUserColorOnBoard(newColor) {
-  if (!newColor) return;
-
-  const boardId = collab.boardId || getOrCreateBoardId();
-  ensureUserIdentity(boardId);
-
-  userIdentity.color = newColor;
-  collab.userColor = newColor;
-  persistUserIdentity(boardId);
-  updatePresencePosition();
-}
-
-// Live cursor presence in Firestore
-function startPresenceListener(boardId) {
-  if (!collab.db || !collab.boardDocRef) return;
-
-  const presenceRef = collab.boardDocRef.collection('presence');
-  collab.presenceRef = presenceRef;
-
-  presenceRef.onSnapshot((snapshot) => {
-    const others = {};
-    const now = Date.now();
-
-    snapshot.forEach((doc) => {
-      if (doc.id === collab.userId) return;
-      const data = doc.data() || {};
-
-      if (typeof data.x !== 'number' || typeof data.y !== 'number') {
-        return;
-      }
-
-      if (typeof data.lastActive === 'number' && now - data.lastActive > PRESENCE_STALE_MS) {
-        return;
-      }
-
-      others[doc.id] = data;
-    });
-
-    collab.otherUsers = others;
-    renderCursors();
-  });
-
-  // Initial write so that others see us
-  updatePresencePosition();
-}
-
-function renderCursors() {
-  if (!cursorsLayer) return;
-
-  cursorsLayer.innerHTML = '';
-
-  if (showCursorsToggle && !showCursorsToggle.checked) {
-    return;
-  }
-
-  const showNames = !showUsernamesToggle || showUsernamesToggle.checked;
-
-  const others = collab.otherUsers || {};
-  Object.keys(others).forEach((id) => {
-    const user = others[id];
-    if (typeof user.x !== 'number' || typeof user.y !== 'number') return;
-
-    const marker = document.createElement('div');
-    marker.className = 'cursor-marker';
-    marker.style.left = user.x + 'px';
-    marker.style.top = user.y + 'px';
-
-    const dot = document.createElement('div');
-    dot.className = 'cursor-dot';
-    dot.style.backgroundColor = user.color || '#22c55e';
-    marker.appendChild(dot);
-
-    if (showNames && user.name) {
-      const label = document.createElement('div');
-      label.className = 'cursor-label';
-      label.textContent = user.name;
-      marker.appendChild(label);
-    }
-
-    cursorsLayer.appendChild(marker);
-  });
-}
-
-function updatePresencePosition(x, y) {
-  if (!collab.presenceRef || !collab.userId) return;
-
-  const now = Date.now();
-  if (x != null && y != null) {
-    if (now - collab.lastPresenceWrite < PRESENCE_THROTTLE_MS) {
-      return;
-    }
-  }
-
-  const data = {
-    name: collab.userName || 'Anonymous',
-    color: collab.userColor || '#22c55e',
-    lastActive: now
-  };
-
-  if (typeof x === 'number' && typeof y === 'number') {
-    data.x = x;
-    data.y = y;
-  }
-
-  collab.lastPresenceWrite = now;
-
-  collab.presenceRef
-    .doc(collab.userId)
-    .set(data, { merge: true })
-    .catch((err) => {
-      console.error('Error writing presence', err);
-    });
-}
-
 // ------------------------------------------------------
 // Firebase collab
 // ------------------------------------------------------
@@ -1233,9 +1034,7 @@ function initFirebaseCollaboration() {
 
   const boardId = getOrCreateBoardId();
   collab.boardId = boardId;
-  const identity = ensureUserIdentity(boardId);
   updateShareLink(boardId);
-
 
   if (copyLinkBtn && shareLinkEl) {
     copyLinkBtn.addEventListener('click', async () => {
@@ -1254,8 +1053,8 @@ function initFirebaseCollaboration() {
   const docRef = db.collection('boards').doc(boardId);
   collab.boardDocRef = docRef;
 
-  // live cursor presence for this board
-  startPresenceListener(boardId);
+  // live cursors / presence
+  initLiveCursorCollaboration();
 
   // load remote board (if that exists) then start listening
   docRef.get().then((snap) => {
@@ -1307,6 +1106,175 @@ function pushBoardToFirestore() {
   });
 }
 
+
+// ------------------------------------------------------
+// Live cursor presence (Firebase sub-collection)
+// ------------------------------------------------------
+function initLiveCursorCollaboration() {
+  if (!collab.db || !collab.boardId) return;
+  if (!window.firebase || !firebase.firestore) return;
+
+  const userId = userIdentity.id || getOrCreateUserId();
+  userIdentity.id = userId;
+
+  const boardDoc = collab.db.collection('boards').doc(collab.boardId);
+  const cursorsCol = boardDoc.collection('cursors');
+  const presenceDoc = cursorsCol.doc(userId);
+  cursorPresence.docRef = presenceDoc;
+
+  // Initial presence (no position yet)
+  try {
+    presenceDoc.set(
+      {
+        name: userIdentity.name || 'Anonymous',
+        color: userIdentity.color,
+        lastSeen: firebase.firestore.FieldValue.serverTimestamp(),
+        x: null,
+        y: null
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Error initialising cursor presence', err);
+  }
+
+  // Listen to other users' cursors
+  cursorPresence.unsubscribe = cursorsCol.onSnapshot((snapshot) => {
+    const now = Date.now();
+    remoteCursors.clear();
+
+    snapshot.forEach((doc) => {
+      if (doc.id === userId) return;
+
+      const data = doc.data() || {};
+      if (typeof data.x !== 'number' || typeof data.y !== 'number') {
+        return;
+      }
+
+      let lastSeenMs = 0;
+      if (data.lastSeen && typeof data.lastSeen.toMillis === 'function') {
+        lastSeenMs = data.lastSeen.toMillis();
+      }
+
+      if (lastSeenMs && now - lastSeenMs > 30000) {
+        // ignore stale cursors (>30s)
+        return;
+      }
+
+      remoteCursors.set(doc.id, {
+        x: data.x,
+        y: data.y,
+        name: data.name || 'Guest',
+        color: data.color || '#f97316'
+      });
+    });
+
+    renderRemoteCursors();
+  });
+
+  // Clean up our presence on unload (best-effort)
+  window.addEventListener('beforeunload', () => {
+    try {
+      if (cursorPresence.docRef) {
+        cursorPresence.docRef.delete();
+      }
+      if (cursorPresence.unsubscribe) {
+        cursorPresence.unsubscribe();
+      }
+    } catch (err) {
+      console.error('Error cleaning up cursor presence', err);
+    }
+  });
+}
+
+function pushIdentityToCursorDoc() {
+  if (!cursorPresence.docRef || !window.firebase || !firebase.firestore) return;
+
+  try {
+    cursorPresence.docRef.set(
+      {
+        name: userIdentity.name || 'Anonymous',
+        color: userIdentity.color,
+        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Cursor identity update error', err);
+  }
+}
+
+function updateOwnCursorPosition(x, y) {
+  if (!cursorPresence.docRef || !window.firebase || !firebase.firestore) return;
+
+  const now = Date.now();
+  if (now - lastCursorSendTime < 50) {
+    return;
+  }
+  lastCursorSendTime = now;
+
+  try {
+    cursorPresence.docRef.set(
+      {
+        x,
+        y,
+        name: userIdentity.name || 'Anonymous',
+        color: userIdentity.color,
+        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Cursor position update error', err);
+  }
+}
+
+function hideOwnCursorRemotely() {
+  if (!cursorPresence.docRef || !window.firebase || !firebase.firestore) return;
+
+  try {
+    cursorPresence.docRef.set(
+      {
+        x: null,
+        y: null,
+        lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    console.error('Cursor hide error', err);
+  }
+}
+
+function renderRemoteCursors() {
+  if (!cursorLayer) return;
+  cursorLayer.innerHTML = '';
+
+  if (!userIdentity.showCursors) {
+    return;
+  }
+
+  remoteCursors.forEach((cursor) => {
+    const el = document.createElement('div');
+    el.className = 'live-cursor';
+    el.style.left = cursor.x + 'px';
+    el.style.top = cursor.y + 'px';
+
+    const dot = document.createElement('div');
+    dot.className = 'live-cursor-dot';
+    dot.style.backgroundColor = cursor.color || '#f97316';
+    el.appendChild(dot);
+
+    if (userIdentity.showUsernames && cursor.name) {
+      const label = document.createElement('div');
+      label.className = 'live-cursor-label';
+      label.textContent = cursor.name;
+      el.appendChild(label);
+    }
+
+    cursorLayer.appendChild(el);
+  });
+}
 // ------------------------------------------------------
 // Initial load
 // ------------------------------------------------------
@@ -1327,11 +1295,11 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   applySavedSettings();
+  ensureUserIdentity();
   updateScale(scale);
 
   // show URL even if Firebase is not configured (still useful lol)
   const boardId = getOrCreateBoardId();
-  ensureUserIdentity(boardId);
   updateShareLink(boardId);
 
   // try to enable Firebase realtime sync
@@ -1460,46 +1428,99 @@ function loadSettings() {
   }
 }
 
-
 function applySavedSettings() {
-  const settings = loadSettings();
+  const settings = loadSettings() || {};
 
-  let dark = true;
-  let showGrid = true;
-  let showCursors = true;
-  let showUsernames = true;
-
-  if (settings) {
-    if (typeof settings.darkMode === 'boolean') {
-      dark = settings.darkMode;
-    }
-    if (typeof settings.showGrid === 'boolean') {
-      showGrid = settings.showGrid;
-    }
-    if (typeof settings.showCursors === 'boolean') {
-      showCursors = settings.showCursors;
-    }
-    if (typeof settings.showUsernames === 'boolean') {
-      showUsernames = settings.showUsernames;
-    }
-  }
+  const dark =
+    typeof settings.darkMode === 'boolean' ? settings.darkMode : true;
+  const showGrid =
+    typeof settings.showGrid === 'boolean' ? settings.showGrid : true;
+  const showUsernames =
+    typeof settings.showUsernames === 'boolean' ? settings.showUsernames : true;
+  const showCursors =
+    typeof settings.showCursors === 'boolean' ? settings.showCursors : true;
+  const cursorColor = settings.cursorColor || '#f97316';
+  const username = settings.username || '';
 
   document.body.classList.toggle('dark', dark);
   board.classList.toggle('no-grid', !showGrid);
 
   if (darkModeToggle) darkModeToggle.checked = dark;
   if (gridToggle) gridToggle.checked = showGrid;
-  if (showCursorsToggle) showCursorsToggle.checked = showCursors;
+
   if (showUsernamesToggle) showUsernamesToggle.checked = showUsernames;
+  if (showCursorsToggle) showCursorsToggle.checked = showCursors;
+  if (cursorColorInput) cursorColorInput.value = cursorColor;
+  if (usernameInput && username) usernameInput.value = username;
+
+  userIdentity.showUsernames = showUsernames;
+  userIdentity.showCursors = showCursors;
+  userIdentity.color = cursorColor;
+  if (username) {
+    userIdentity.name = username;
+  }
 }
 
 function getCurrentSettings() {
   return {
     darkMode: !!(darkModeToggle && darkModeToggle.checked),
     showGrid: !!(gridToggle && gridToggle.checked),
+    showUsernames: !!(showUsernamesToggle && showUsernamesToggle.checked),
     showCursors: !!(showCursorsToggle && showCursorsToggle.checked),
-    showUsernames: !!(showUsernamesToggle && showUsernamesToggle.checked)
+    cursorColor: cursorColorInput ? cursorColorInput.value : '#f97316',
+    username: usernameInput ? usernameInput.value.trim() : (userIdentity.name || '')
   };
+}
+
+function getOrCreateUserId() {
+  let id = null;
+  try {
+    id = localStorage.getItem('simple_whiteboard_v16_user_id');
+  } catch (err) {
+    console.error('Error reading user id', err);
+  }
+
+  if (!id) {
+    id = 'user-' + Math.random().toString(36).slice(2, 10);
+    try {
+      localStorage.setItem('simple_whiteboard_v16_user_id', id);
+    } catch (err) {
+      console.error('Error saving user id', err);
+    }
+  }
+  return id;
+}
+
+function ensureUserIdentity() {
+  if (!userIdentity.id) {
+    userIdentity.id = getOrCreateUserId();
+  }
+
+  if (!userIdentity.name) {
+    const fallback = 'Guest-' + Math.floor(Math.random() * 9999);
+    let name = window.prompt(
+      'Pick a name so others can see who you are on this board:',
+      fallback
+    );
+
+    if (name === null) {
+      name = fallback;
+    }
+    name = String(name).trim();
+    if (!name) {
+      name = fallback;
+    }
+
+    userIdentity.name = name;
+
+    if (usernameInput) {
+      usernameInput.value = name;
+    }
+
+    const settings = getCurrentSettings();
+    settings.username = name;
+    saveSettings(settings);
+  }
 }
 
 if (darkModeToggle) {
@@ -1518,37 +1539,6 @@ if (gridToggle) {
   });
 }
 
-
-if (showCursorsToggle) {
-  showCursorsToggle.addEventListener('change', () => {
-    saveSettings(getCurrentSettings());
-    renderCursors();
-  });
-}
-
-if (showUsernamesToggle) {
-  showUsernamesToggle.addEventListener('change', () => {
-    saveSettings(getCurrentSettings());
-    renderCursors();
-  });
-}
-
-if (userCursorColorInput) {
-  userCursorColorInput.addEventListener('change', () => {
-    updateUserColorOnBoard(userCursorColorInput.value);
-  });
-}
-
-if (changeNameBtn) {
-  changeNameBtn.addEventListener('click', () => {
-    const currentName = (userIdentity && userIdentity.name) || (collab && collab.userName) || '';
-    const next = prompt('Choose a new name for yourself:', currentName || '');
-    if (next && next.trim()) {
-      updateUserNameOnBoard(next);
-    }
-  });
-}
-
 if (resetZoomBtn) {
   resetZoomBtn.addEventListener('click', () => {
     scale = 1;
@@ -1563,17 +1553,83 @@ if (resetZoomBtn) {
   });
 }
 
+function openSettingsModal() {
+  if (!settingsPanel) return;
+  settingsPanel.classList.add('open');
+  if (settingsToggleBtn) {
+    settingsToggleBtn.classList.add('active');
+  }
+}
+
+function closeSettingsModal() {
+  if (!settingsPanel) return;
+  settingsPanel.classList.remove('open');
+  if (settingsToggleBtn) {
+    settingsToggleBtn.classList.remove('active');
+  }
+}
+
 if (settingsToggleBtn && settingsPanel) {
   settingsToggleBtn.addEventListener('click', () => {
-    const isOpen = settingsPanel.classList.toggle('open');
-    settingsToggleBtn.classList.toggle('active', isOpen);
+    if (settingsPanel.classList.contains('open')) {
+      closeSettingsModal();
+    } else {
+      openSettingsModal();
+    }
   });
 }
 
+if (settingsCloseBtn) {
+  settingsCloseBtn.addEventListener('click', () => {
+    closeSettingsModal();
+  });
+}
+
+if (showUsernamesToggle) {
+  showUsernamesToggle.addEventListener('change', () => {
+    userIdentity.showUsernames = showUsernamesToggle.checked;
+    saveSettings(getCurrentSettings());
+    renderRemoteCursors();
+  });
+}
+
+if (showCursorsToggle) {
+  showCursorsToggle.addEventListener('change', () => {
+    userIdentity.showCursors = showCursorsToggle.checked;
+    saveSettings(getCurrentSettings());
+    renderRemoteCursors();
+  });
+}
+
+if (cursorColorInput) {
+  cursorColorInput.addEventListener('input', () => {
+    userIdentity.color = cursorColorInput.value || '#f97316';
+    saveSettings(getCurrentSettings());
+    pushIdentityToCursorDoc();
+  });
+}
+
+if (usernameInput) {
+  usernameInput.addEventListener('change', () => {
+    let name = usernameInput.value.trim();
+    if (!name) {
+      name = userIdentity.name || 'Guest-' + Math.floor(Math.random() * 9999);
+      usernameInput.value = name;
+    }
+    userIdentity.name = name;
+    saveSettings(getCurrentSettings());
+    pushIdentityToCursorDoc();
+  });
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && settingsPanel && settingsPanel.classList.contains('open')) {
+    closeSettingsModal();
+  }
+});
 // ------------------------------------------------------
 // Coords indicator
 // ------------------------------------------------------
-
 function updateCoords(e) {
   if (!coordsIndicator) return;
 
@@ -1583,22 +1639,21 @@ function updateCoords(e) {
 
   if (x < 0 || y < 0 || x > board.offsetWidth || y > board.offsetHeight) {
     coordsIndicator.textContent = 'x: -, y: -';
+    hideOwnCursorRemotely();
     return;
   }
 
-  const roundedX = Math.round(x);
-  const roundedY = Math.round(y);
-  coordsIndicator.textContent = `x: ${roundedX}, y: ${roundedY}`;
-
-  updatePresencePosition(roundedX, roundedY);
+  coordsIndicator.textContent = `x: ${Math.round(x)}, y: ${Math.round(y)}`;
+  updateOwnCursorPosition(x, y);
 }
+
 document.addEventListener('mousemove', updateCoords);
 document.addEventListener('mouseleave', () => {
   if (coordsIndicator) {
     coordsIndicator.textContent = 'x: -, y: -';
   }
+  hideOwnCursorRemotely();
 });
-
 // ------------------------------------------------------
 // Connections (SVG layer)
 // ------------------------------------------------------
@@ -1798,15 +1853,3 @@ function endDrawing() {
 
 drawLayer.addEventListener('mouseup', endDrawing);
 drawLayer.addEventListener('mouseleave', endDrawing);
-
-
-// Try to clean up presence when leaving the page
-window.addEventListener('beforeunload', () => {
-  if (collab.presenceRef && collab.userId) {
-    try {
-      collab.presenceRef.doc(collab.userId).delete();
-    } catch (err) {
-      // ignore
-    }
-  }
-});

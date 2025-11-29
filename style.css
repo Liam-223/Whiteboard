@@ -218,6 +218,28 @@ body {
   border: 1px dashed #d1d5db;
   background: #ffffff;
 }
+.info-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.info-actions .secondary-btn.small {
+  flex: 1;
+  text-align: center;
+}
+
+/* Custom note color picker */
+.note-color-custom {
+  width: 24px;
+  height: 18px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,0.2);
+  background: transparent;
+  cursor: pointer;
+}
+
 
 /* Draw controls */
 .draw-controls,

@@ -56,6 +56,7 @@ const eraseWidthInput = document.getElementById('erase-width');
 // Collaboration UI
 const shareLinkEl = document.getElementById('share-link');
 const copyLinkBtn = document.getElementById('copy-link-btn');
+const toggleLinkVisibilityBtn = document.getElementById('toggle-link-visibility-btn');
 
 // ------------------------------------------------------
 // State
@@ -102,6 +103,9 @@ let collab = {
   lastLocalUpdate: 0,
   isApplyingRemote: false
 };
+
+let currentShareLink = '';
+let shareLinkVisible = false;
 
 // Live cursor / user presence
 let userIdentity = {
@@ -163,8 +167,11 @@ function updateShareLink(boardId) {
   const url = new URL(window.location.href);
   url.searchParams.set('board', boardId);
   const link = url.toString();
+  currentShareLink = link;
   if (shareLinkEl) {
-    shareLinkEl.textContent = link;
+    shareLinkEl.textContent = shareLinkVisible
+      ? link
+      : 'Hidden (click "Show link" to reveal it)';
   }
 }
 
@@ -414,6 +421,18 @@ function createNote({ id, x, y, title, text, color, width, height }) {
     colorPicker.appendChild(btn);
   });
 
+  const customColorInput = document.createElement('input');
+  customColorInput.type = 'color';
+  customColorInput.className = 'note-color-custom';
+  customColorInput.value = resolveNoteColorValue(note.dataset.color);
+  customColorInput.addEventListener('input', (e) => {
+    e.stopPropagation();
+    const hex = e.target.value || '#fef9c3';
+    setNoteColor(note, hex);
+    autoSaveToLocalStorage();
+  });
+  colorPicker.appendChild(customColorInput);
+
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'note-delete-btn';
   deleteBtn.innerText = '✕';
@@ -459,10 +478,38 @@ function createNote({ id, x, y, title, text, color, width, height }) {
 function setNoteColor(note, color) {
   note.dataset.color = color;
 
+  const resolved = resolveNoteColorValue(color);
+  note.style.backgroundColor = resolved;
+  note.style.borderColor = resolved;
+
   const dots = note.querySelectorAll('.note-color-dot');
   dots.forEach((dot) => {
     dot.classList.toggle('active', dot.dataset.color === color);
   });
+
+  const customInput = note.querySelector('.note-color-custom');
+  if (customInput) {
+    customInput.value = resolved;
+  }
+}
+
+
+function resolveNoteColorValue(color) {
+  switch (color) {
+    case 'yellow':
+      return '#fef9c3';
+    case 'blue':
+      return '#dbeafe';
+    case 'green':
+      return '#dcfce7';
+    case 'pink':
+      return '#fce7f3';
+    default:
+      if (typeof color === 'string' && color.startsWith('#')) {
+        return color;
+      }
+      return '#fef9c3';
+  }
 }
 
 // ------------------------------------------------------
@@ -1039,13 +1086,27 @@ function initFirebaseCollaboration() {
   if (copyLinkBtn && shareLinkEl) {
     copyLinkBtn.addEventListener('click', async () => {
       try {
-        await navigator.clipboard.writeText(shareLinkEl.textContent);
+        const textToCopy = currentShareLink || window.location.href;
+        await navigator.clipboard.writeText(textToCopy);
         copyLinkBtn.textContent = 'Copied!';
         setTimeout(() => {
           copyLinkBtn.textContent = 'Copy link';
         }, 1500);
       } catch (err) {
         console.error('Clipboard error', err);
+      }
+    });
+  }
+
+  if (toggleLinkVisibilityBtn && shareLinkEl) {
+    toggleLinkVisibilityBtn.addEventListener('click', () => {
+      shareLinkVisible = !shareLinkVisible;
+      if (shareLinkVisible) {
+        shareLinkEl.textContent = currentShareLink || window.location.href;
+        toggleLinkVisibilityBtn.textContent = 'Hide link';
+      } else {
+        shareLinkEl.textContent = 'Hidden (click "Show link" to reveal it)';
+        toggleLinkVisibilityBtn.textContent = 'Show link';
       }
     });
   }

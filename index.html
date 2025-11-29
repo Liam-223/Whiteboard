@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>My Whiteboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="style.css" />
+
+  <!-- Firebase stuff for multiplayer, i still hate google -->
+  <!-- remove these two lines == no realtime sync -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+</head>
+<body class="dark">
+  <div class="sidebar">
+    <h1>Whiteboard</h1>
+
+    <div class="toolbar">
+      <button id="add-note-btn">+ Add note</button>
+
+      <label for="image-upload" class="file-label">📎 Upload image</label>
+      <input type="file" id="image-upload" accept="image/*" />
+
+      <button id="add-voice-btn">🎙 Voice note</button>
+
+      <button id="save-board-btn">💾 Save board to file</button>
+      <button id="load-board-btn">📂 Load board from file</button>
+      <!-- <label for="board-file-input" class="file-label">📂 Choose board file</label> --> 
+      <input type="file" id="board-file-input" accept="application/json,.json" />
+
+      <button id="clear-board-btn">🗑 Clear board</button>
+
+      <div class="zoom-indicator" id="zoom-indicator">Zoom: 100%</div>
+
+      <button id="draw-mode-btn" class="secondary-btn">✏️ Draw</button>
+      <div class="draw-controls" id="draw-controls">
+        <label>
+          Pen color
+          <input type="color" id="draw-color" value="#ffffff" />
+        </label>
+        <label>
+          Pen size
+          <input type="range" id="draw-width" min="1" max="16" value="3" />
+        </label>
+      </div>
+
+      <button id="erase-mode-btn" class="secondary-btn">🩹 Eraser</button>
+      <div class="erase-controls" id="erase-controls">
+        <label>
+          Eraser size
+          <input type="range" id="erase-width" min="4" max="48" value="20" />
+        </label>
+      </div>
+
+      <button id="settings-toggle-btn" class="secondary-btn">⚙ Settings</button>
+    </div>
+
+        <div class="settings-panel" id="settings-panel">
+      <h2>⚙ Settings</h2>
+
+      <div class="settings-section">
+        <div class="settings-section-title">Board settings</div>
+        <label class="setting-item">
+          <input type="checkbox" id="grid-toggle" checked />
+          <span>Show grid</span>
+        </label>
+      </div>
+
+      <div class="settings-section">
+        <div class="settings-section-title">My settings</div>
+        <label class="setting-item">
+          <input type="checkbox" id="dark-mode-toggle" checked />
+          <span>Dark mode</span>
+        </label>
+
+        <div class="user-settings-row">
+          <span class="user-settings-label">You:</span>
+          <span id="current-username">Anonymous</span>
+          <button id="change-name-btn" class="secondary-btn small" type="button">
+            Change
+          </button>
+        </div>
+
+        <label class="setting-item">
+          <span>Cursor color</span>
+          <input type="color" id="user-cursor-color" />
+        </label>
+
+        <label class="setting-item">
+          <input type="checkbox" id="show-cursors-toggle" checked />
+          <span>Show other cursors</span>
+        </label>
+
+        <label class="setting-item">
+          <input type="checkbox" id="show-usernames-toggle" checked />
+          <span>Show other usernames</span>
+        </label>
+      </div>
+
+      <button id="reset-zoom-btn" class="secondary-btn">Reset zoom</button>
+    </div>
+    <div class="info-panel">
+      <div class="info-title">Share this board</div>
+      <div class="info-text">
+        Anyone with THIS link can view & edit your board!
+      </div>
+      <div class="info-link" id="share-link">Loading...</div>
+      <button id="copy-link-btn" class="secondary-btn small">Copy link</button>
+    </div>
+  </div>
+
+  <div class="board-container" id="board-container">
+    <div class="board" id="board">
+      <canvas class="draw-layer" id="draw-layer"></canvas>
+      <svg class="connections-layer" id="connections-layer"></svg>
+      <div class="cursors-layer" id="cursors-layer"></div>
+    </div>
+  </div>
+
+  <div class="coords-indicator" id="coords-indicator">x: -, y: -</div>
+
+  <script src="script.js"></script>
+</body>
+</html>

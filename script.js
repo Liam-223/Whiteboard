@@ -1105,7 +1105,7 @@ function autoSaveToLocalStorage() {
     console.error('Auto-save error', err);
   }
 
-  if (collab.boardDocRef && !collab.isApplyingRemote) {
+  if (collab.enabled && collab.boardDocRef) {
     pushBoardToFirestore();
   }
 }
@@ -1258,7 +1258,10 @@ function initFirebaseCollaboration() {
       const data = snapshot.data();
       if (!data || !data.board) return;
 
-      // Always apply remote board state; collab.isApplyingRemote prevents feedback loops
+      if (data.updatedAt && data.updatedAt <= collab.lastLocalUpdate) {
+        return;
+      }
+
       collab.isApplyingRemote = true;
       loadBoardFromData(data.board);
       collab.isApplyingRemote = false;

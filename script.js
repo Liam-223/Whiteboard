@@ -164,7 +164,10 @@ let collab = {
   boardDocRef: null,
   boardId: null,
   lastLocalUpdate: 0,
-  isApplyingRemote: false
+  isApplyingRemote: false,
+  lastRemoteBoard: null,
+  lastRemoteDrawing: null,
+  lastRemoteConnections: null
 };
 
 let currentShareLink = '';
@@ -1097,6 +1100,110 @@ function loadBoardFromData(data) {
   refreshConnections();
 }
 
+
+function applyRemoteBoardDiff(boardData) {
+  if (!boardData || !Array.isArray(boardData.items)) {
+    return;
+  }
+
+  // --- Drawing layer ---
+  if (drawCtx) {
+    const incomingDrawing = boardData.drawing || null;
+    if (incomingDrawing !== collab.lastRemoteDrawing) {
+      collab.lastRemoteDrawing = incomingDrawing;
+
+      drawCtx.clearRect(0, 0, drawLayer.width, drawLayer.height);
+      if (incomingDrawing) {
+        const img = new Image();
+        img.onload = () => {
+          drawCtx.clearRect(0, 0, drawLayer.width, drawLayer.height);
+          drawCtx.drawImage(img, 0, 0, drawLayer.width, drawLayer.height);
+        };
+        img.src = incomingDrawing;
+      }
+    }
+  }
+
+  // --- Connections ---
+  const incomingConnections = Array.isArray(boardData.connections)
+    ? boardData.connections
+    : [];
+
+  const prevConnections = collab.lastRemoteConnections || [];
+  const sameConnections =
+    JSON.stringify(incomingConnections) === JSON.stringify(prevConnections);
+
+  if (!sameConnections) {
+    connections = incomingConnections.slice();
+    collab.lastRemoteConnections = incomingConnections.slice();
+    refreshConnections();
+  }
+
+  // --- Items (notes, images, voice notes) ---
+  const existingElsById = {};
+  const itemSelector = '.note, .image-item, .voice-item';
+
+  board.querySelectorAll(itemSelector).forEach((el) => {
+    const id = el.dataset.itemId;
+    if (id) {
+      existingElsById[id] = el;
+    }
+  });
+
+  const seenIds = new Set();
+
+  boardData.items.forEach((item) => {
+    if (!item || !item.id) return;
+    const id = item.id;
+    seenIds.add(id);
+
+    const existing = existingElsById[id];
+
+    // helper to create a fresh element from item data
+    function createFromItem(it) {
+      if (it.type === 'note') {
+        return createNote(it);
+      }
+      if (it.type === 'image') {
+        return createImageItem(it);
+      }
+      if (it.type === 'voice') {
+        return createVoiceItem(it);
+      }
+      return null;
+    }
+
+    if (!existing) {
+      const el = createFromItem(item);
+      if (el) {
+        board.appendChild(el);
+      }
+      return;
+    }
+
+    // Replace the element completely with a new one – simpler + avoids
+    // partial state bugs. This only happens for remote updates (not our own),
+    // because we skip our own writes via updatedAt checks.
+    const replacement = createFromItem(item);
+    if (replacement) {
+      board.replaceChild(replacement, existing);
+    }
+  });
+
+  // Remove any local items that no longer exist in the remote board
+  Object.keys(existingElsById).forEach((id) => {
+    if (!seenIds.has(id)) {
+      const el = existingElsById[id];
+      if (el && el.parentNode === board) {
+        el.remove();
+      }
+    }
+  });
+
+  refreshNextItemId();
+}
+
+
 function autoSaveToLocalStorage() {
   const data = serializeBoard();
   try {
@@ -1240,35 +1347,46 @@ function initFirebaseCollaboration() {
   initLiveCursorCollaboration();
 
   // load remote board (if that exists) then start listening
-  docRef.get().then((snap) => {
-    const remoteData = snap.data();
-    if (remoteData && remoteData.board) {
-      collab.isApplyingRemote = true;
-      loadBoardFromData(remoteData.board);
-      collab.isApplyingRemote = false;
-    } else {
-      // no remote board yet == push our current state
-      pushBoardToFirestore();
-    }
-
-    collab.enabled = true;
-    collab.lastLocalUpdate = Date.now();
-
-    docRef.onSnapshot((snapshot) => {
-      const data = snapshot.data();
-      if (!data || !data.board) return;
-
-      if (data.updatedAt && data.updatedAt <= collab.lastLocalUpdate) {
-        return;
+  docRef
+    .get()
+    .then((snap) => {
+      const remoteData = snap.data();
+      if (remoteData && remoteData.board) {
+        collab.isApplyingRemote = true;
+        // Initial full load from remote
+        loadBoardFromData(remoteData.board);
+        collab.isApplyingRemote = false;
+        collab.lastRemoteBoard = remoteData.board;
+        collab.lastRemoteDrawing = remoteData.board.drawing || null;
+        collab.lastRemoteConnections = Array.isArray(remoteData.board.connections)
+          ? remoteData.board.connections.slice()
+          : [];
+      } else {
+        // no remote board yet == push our current state
+        pushBoardToFirestore();
       }
 
-      collab.isApplyingRemote = true;
-      loadBoardFromData(data.board);
-      collab.isApplyingRemote = false;
+      collab.enabled = true;
+      collab.lastLocalUpdate = Date.now();
+
+      docRef.onSnapshot((snapshot) => {
+        const data = snapshot.data();
+        if (!data || !data.board) return;
+
+        if (data.updatedAt && data.updatedAt <= collab.lastLocalUpdate) {
+          return;
+        }
+
+        collab.isApplyingRemote = true;
+        applyRemoteBoardDiff(data.board);
+        collab.isApplyingRemote = false;
+        collab.lastRemoteBoard = data.board;
+      });
+    })
+    .catch((err) => {
+      console.error('Error initializing collaboration', err);
     });
-  }).catch((err) => {
-    console.error('Error initializing collaboration', err);
-  });
+
 }
 
 function pushBoardToFirestore() {

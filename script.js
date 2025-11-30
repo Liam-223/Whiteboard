@@ -1748,7 +1748,7 @@ document.addEventListener('mouseleave', () => {
   hideOwnCursorRemotely();
 });
 // ------------------------------------------------------
-// Connections (SVG layer)
+// connections (on SVG layer)
 // ------------------------------------------------------
 function refreshConnections() {
   if (!connectionsLayer) return;

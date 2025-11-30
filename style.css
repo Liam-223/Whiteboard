@@ -12,14 +12,16 @@ body {
   color: #111827;
 }
 
-/* Smooth UI animations */
+/* smooth UI animations */
 .sidebar button,
-.file-label {
+.file-label,
+.settings-tab {
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
 }
 
 .sidebar button:hover,
-.file-label:hover {
+.file-label:hover,
+.settings-tab:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 10px rgba(15, 23, 42, 0.25);
 }
@@ -162,14 +164,15 @@ body {
 
 .settings-tab {
   flex: 1;
-  border-radius: 999px;
-  border: none;
-  background: transparent;
-  padding: 6px 8px;
-  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: white;
+  padding: 8px 10px;
+  font-size: 13px;
   cursor: pointer;
-  color: #4b5563;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+  color: #111827;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease;
 }
 
 .settings-tab:hover {
@@ -177,8 +180,9 @@ body {
 }
 
 .settings-tab.active {
-  background: #111827;
-  color: #f9fafb;
+  border-color: #4f46e5;
+  color: #4f46e5;
+  background: #eef2ff;
 }
 
 .settings-section[data-settings-panel] {
@@ -752,12 +756,15 @@ body.dark .settings-topbar {
 }
 
 body.dark .settings-tab {
-  color: #9ca3af;
+  background: #020617;
+  color: #e5e7eb;
+  border-color: #1f2937;
 }
 
 body.dark .settings-tab.active {
-  background: #f9fafb;
-  color: #020617;
+  background: #1d283a;
+  border-color: #6366f1;
+  color: #e5e7eb;
 }
 
 

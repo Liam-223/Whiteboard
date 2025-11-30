@@ -62,41 +62,47 @@
           <button id="settings-close-btn" class="settings-close-btn" type="button">✕</button>
         </div>
 
-        <div class="settings-section">
-          <div class="settings-section-title">Board settings</div>
-          <label class="setting-item">
-            <input type="checkbox" id="grid-toggle" checked />
-            <span>Show grid</span>
-          </label>
-          <button id="reset-zoom-btn" class="secondary-btn" type="button">Reset zoom</button>
+        <div class="settings-topbar">
+          <button class="settings-tab active" type="button" data-settings-tab="board">Board</button>
+          <button class="settings-tab" type="button" data-settings-tab="user">User</button>
         </div>
 
-        <div class="settings-section">
-          <div class="settings-section-title">My settings</div>
-          <label class="setting-item">
-            <input type="checkbox" id="dark-mode-toggle" checked />
-            <span>Dark mode</span>
-          </label>
-          <label class="setting-item">
-            <input type="checkbox" id="show-cursors-toggle" checked />
-            <span>Show other cursors</span>
-          </label>
-          <label class="setting-item">
-            <input type="checkbox" id="show-usernames-toggle" checked />
-            <span>Show other names</span>
-          </label>
-          <label class="setting-item">
-            <span>My cursor color</span>
-            <input type="color" id="cursor-color-input" value="#f97316" />
-          </label>
-          <label class="setting-item">
-            <span>My name</span>
-            <input type="text" id="username-input" placeholder="Your name" />
-          </label>
+        <div class="settings-body">
+          <div class="settings-section active" data-settings-panel="board">
+            <div class="settings-section-title">Board settings</div>
+            <label class="setting-item">
+              <input type="checkbox" id="grid-toggle" checked />
+              <span>Show grid</span>
+            </label>
+            <button id="reset-zoom-btn" class="secondary-btn" type="button">Reset zoom</button>
+          </div>
+
+          <div class="settings-section" data-settings-panel="user">
+            <div class="settings-section-title">My settings</div>
+            <label class="setting-item">
+              <input type="checkbox" id="dark-mode-toggle" checked />
+              <span>Dark mode</span>
+            </label>
+            <label class="setting-item">
+              <input type="checkbox" id="show-cursors-toggle" checked />
+              <span>Show other cursors</span>
+            </label>
+            <label class="setting-item">
+              <input type="checkbox" id="show-usernames-toggle" checked />
+              <span>Show other names</span>
+            </label>
+            <label class="setting-item">
+              <span>My cursor color</span>
+              <input type="color" id="cursor-color-input" value="#f97316" />
+            </label>
+            <label class="setting-item">
+              <span>My name</span>
+              <input type="text" id="username-input" placeholder="Your name" />
+            </label>
+          </div>
         </div>
       </div>
     </div>
-
     <div class="info-panel">
       <div class="info-title">Share this board</div>
       <div class="info-text">

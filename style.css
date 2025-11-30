@@ -36,6 +36,17 @@ body {
   }
 }
 
+@keyframes settingsPop {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .sidebar {
   width: 340px;
   background: #ffffff;
@@ -88,6 +99,11 @@ body {
   gap: 10px;
 }
 
+.settings-panel.open .settings-modal {
+  animation: settingsPop 0.2s ease-out;
+}
+
+
 .settings-modal-header {
   display: flex;
   align-items: center;
@@ -129,6 +145,50 @@ body {
   flex-direction: column;
   gap: 6px;
 }
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-topbar {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 999px;
+  background: #f3f4f6;
+}
+
+.settings-tab {
+  flex: 1;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  padding: 6px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #4b5563;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.settings-tab:hover {
+  transform: translateY(-1px);
+}
+
+.settings-tab.active {
+  background: #111827;
+  color: #f9fafb;
+}
+
+.settings-section[data-settings-panel] {
+  display: none;
+}
+
+.settings-section[data-settings-panel].active {
+  display: flex;
+}
+
 
 .settings-section-title {
   font-size: 11px;
@@ -686,6 +746,20 @@ body.dark .settings-modal {
   background: #020617;
   border-color: #1f2937;
 }
+
+body.dark .settings-topbar {
+  background: #020617;
+}
+
+body.dark .settings-tab {
+  color: #9ca3af;
+}
+
+body.dark .settings-tab.active {
+  background: #f9fafb;
+  color: #020617;
+}
+
 
 body.dark .settings-modal-header h2 {
   color: #e5e7eb;

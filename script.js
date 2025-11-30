@@ -42,6 +42,9 @@ const showUsernamesToggle = document.getElementById('show-usernames-toggle');
 const showCursorsToggle = document.getElementById('show-cursors-toggle');
 const cursorColorInput = document.getElementById('cursor-color-input');
 const coordsIndicator = document.getElementById('coords-indicator');
+const settingsTabs = document.querySelectorAll('.settings-tab');
+const settingsSections = document.querySelectorAll('.settings-section[data-settings-panel]');
+
 
 // Drawing tools
 const drawModeBtn = document.getElementById('draw-mode-btn');
@@ -1614,9 +1617,24 @@ if (resetZoomBtn) {
   });
 }
 
+function setActiveSettingsTab(tabName) {
+  if (!settingsTabs || !settingsSections) return;
+
+  settingsTabs.forEach((tab) => {
+    const isActive = tab.dataset.settingsTab === tabName;
+    tab.classList.toggle('active', isActive);
+  });
+
+  settingsSections.forEach((section) => {
+    const isActive = section.dataset.settingsPanel === tabName;
+    section.classList.toggle('active', isActive);
+  });
+}
+
 function openSettingsModal() {
   if (!settingsPanel) return;
   settingsPanel.classList.add('open');
+  setActiveSettingsTab('board');
   if (settingsToggleBtn) {
     settingsToggleBtn.classList.add('active');
   }
@@ -1644,6 +1662,20 @@ if (settingsCloseBtn) {
   settingsCloseBtn.addEventListener('click', () => {
     closeSettingsModal();
   });
+}
+
+if (settingsTabs && settingsTabs.length && settingsSections && settingsSections.length) {
+  settingsTabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const tabName = tab.dataset.settingsTab;
+      if (tabName) {
+        setActiveSettingsTab(tabName);
+      }
+    });
+  });
+
+  // initial state
+  setActiveSettingsTab('board');
 }
 
 if (showUsernamesToggle) {

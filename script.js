@@ -2025,3 +2025,245 @@ drawLayer.addEventListener('mouseleave', endDrawing);
     });
   });
 })();
+
+
+// === Delta / patch-based Firestore sync overrides ===
+// This block overrides the original full-board Firestore sync
+// and stores items / connections in subcollections for better merging.
+
+if (typeof collab === 'object' && collab) {
+  collab.itemsColRef = collab.itemsColRef || null;
+  collab.connectionsColRef = collab.connectionsColRef || null;
+  collab.skipNextItemsSnapshot = false;
+  collab.skipNextConnectionsSnapshot = false;
+}
+
+function getConnectionDocId(conn) {
+  return conn.fromId + '__' + conn.toId;
+}
+
+// Apply a single remote item document to the DOM
+function applyRemoteItemDoc(item) {
+  if (!item || !item.id || !item.type) return;
+
+  collab.isApplyingRemote = true;
+  try {
+    const existing = board.querySelector('[data-item-id="' + item.id + '"]');
+    if (existing) existing.remove();
+
+    let el = null;
+    if (item.type === 'note') {
+      el = createNote(item);
+    } else if (item.type === 'image') {
+      el = createImageItem(item);
+    } else if (item.type === 'voice') {
+      el = createVoiceItem(item);
+    }
+
+    if (el) {
+      board.appendChild(el);
+      refreshConnections();
+    }
+  } finally {
+    collab.isApplyingRemote = false;
+  }
+}
+
+function removeLocalItemById(id) {
+  const existing = board.querySelector('[data-item-id="' + id + '"]');
+  if (existing) {
+    existing.remove();
+    refreshConnections();
+  }
+}
+
+function handleItemsSnapshot(snapshot) {
+  if (!snapshot) return;
+  if (collab.skipNextItemsSnapshot) {
+    collab.skipNextItemsSnapshot = false;
+    return;
+  }
+
+  snapshot.docChanges().forEach(function (change) {
+    const data = change.doc.data();
+    if (!data) return;
+
+    if (change.type === 'added' || change.type === 'modified') {
+      applyRemoteItemDoc(data);
+    } else if (change.type === 'removed') {
+      removeLocalItemById(change.doc.id);
+    }
+  });
+}
+
+function handleConnectionsSnapshot(snapshot) {
+  if (!snapshot) return;
+  if (collab.skipNextConnectionsSnapshot) {
+    collab.skipNextConnectionsSnapshot = false;
+    return;
+  }
+
+  const newConnections = [];
+  snapshot.forEach(function (doc) {
+    const data = doc.data();
+    if (!data || !data.fromId || !data.toId) return;
+    newConnections.push({ fromId: data.fromId, toId: data.toId });
+  });
+
+  collab.isApplyingRemote = true;
+  try {
+    connections = newConnections;
+    refreshConnections();
+  } finally {
+    collab.isApplyingRemote = false;
+  }
+}
+
+// Override autoSaveToLocalStorage so it still saves locally
+// but now triggers per-item Firestore sync instead of full-board overwrite.
+function autoSaveToLocalStorage() {
+  const data = serializeBoard();
+  try {
+    localStorage.setItem(STORAGE_BOARD_KEY, JSON.stringify(data));
+  } catch (err) {
+    console.error('Auto-save error', err);
+  }
+
+  if (collab.enabled && collab.boardDocRef) {
+    pushBoardToFirestore();
+  }
+}
+
+// New implementation: write items & connections into subcollections
+function pushBoardToFirestore() {
+  if (!collab.db || !collab.boardDocRef || typeof firebase === 'undefined' || !firebase.firestore) return;
+  if (!collab.itemsColRef || !collab.connectionsColRef) return;
+  if (collab.isApplyingRemote) return;
+
+  const boardData = serializeBoard();
+  const batch = collab.db.batch();
+
+  (boardData.items || []).forEach(function (item) {
+    if (!item.id) return;
+    const ref = collab.itemsColRef.doc(item.id);
+    batch.set(ref, item, { merge: true });
+  });
+
+  (boardData.connections || []).forEach(function (conn) {
+    if (!conn.fromId || !conn.toId) return;
+    const id = getConnectionDocId(conn);
+    const ref = collab.connectionsColRef.doc(id);
+    batch.set(ref, { fromId: conn.fromId, toId: conn.toId }, { merge: true });
+  });
+
+  batch.commit().catch(function (err) {
+    console.error('Firestore batch write error', err);
+  });
+}
+
+// Override initFirebaseCollaboration to use per-item collections
+function initFirebaseCollaboration() {
+  if (typeof firebase === 'undefined' || !window.FIREBASE_CONFIG || !window.FIREBASE_CONFIG.projectId) {
+    console.warn('Firebase not configured – realtime collaboration disabled.');
+    if (shareLinkEl) {
+      shareLinkEl.textContent = 'Collaboration is disabled (no Firebase config).';
+    }
+    return;
+  }
+
+  try {
+    firebase.initializeApp(window.FIREBASE_CONFIG);
+  } catch (err) {
+    // ignore the "already exists" errors
+  }
+
+  const db = firebase.firestore();
+  collab.db = db;
+
+  const boardId = getOrCreateBoardId();
+  collab.boardId = boardId;
+  updateShareLink(boardId);
+
+  if (copyLinkBtn && shareLinkEl) {
+    copyLinkBtn.onclick = async function () {
+      try {
+        const textToCopy = currentShareLink || window.location.href;
+        await navigator.clipboard.writeText(textToCopy);
+        copyLinkBtn.textContent = 'Copied!';
+        setTimeout(function () {
+          copyLinkBtn.textContent = 'Copy link';
+        }, 1500);
+      } catch (err) {
+        console.error('Clipboard error', err);
+      }
+    };
+  }
+
+  if (toggleLinkVisibilityBtn && shareLinkEl) {
+    toggleLinkVisibilityBtn.onclick = function () {
+      shareLinkVisible = !shareLinkVisible;
+      if (shareLinkVisible) {
+        shareLinkEl.textContent = currentShareLink || window.location.href;
+        toggleLinkVisibilityBtn.textContent = 'Hide link';
+      } else {
+        shareLinkEl.textContent = 'Hidden (click "Show link" to reveal it)';
+        toggleLinkVisibilityBtn.textContent = 'Show link';
+      }
+    };
+  }
+
+  const docRef = db.collection('boards').doc(boardId);
+  collab.boardDocRef = docRef;
+  collab.itemsColRef = docRef.collection('items');
+  collab.connectionsColRef = docRef.collection('connections');
+
+  // live cursors / presence (existing implementation)
+  initLiveCursorCollaboration();
+
+  Promise.all([
+    collab.itemsColRef.get(),
+    collab.connectionsColRef.get()
+  ]).then(function (results) {
+    const itemsSnap = results[0];
+    const connSnap = results[1];
+    const hasRemote = !itemsSnap.empty || !connSnap.empty;
+
+    if (hasRemote) {
+      const remoteBoard = { version: 1, items: [], connections: [], drawing: null };
+
+      itemsSnap.forEach(function (doc) {
+        const data = doc.data();
+        if (data) remoteBoard.items.push(data);
+      });
+
+      connSnap.forEach(function (doc) {
+        const data = doc.data();
+        if (data && data.fromId && data.toId) {
+          remoteBoard.connections.push({ fromId: data.fromId, toId: data.toId });
+        }
+      });
+
+      collab.isApplyingRemote = true;
+      try {
+        loadBoardFromData(remoteBoard);
+      } finally {
+        collab.isApplyingRemote = false;
+      }
+    } else {
+      // No remote state yet – push our current local board
+      pushBoardToFirestore();
+    }
+
+    collab.enabled = true;
+    collab.lastLocalUpdate = Date.now();
+
+    // Skip the initial "added" events that simply mirror the state we just loaded
+    collab.skipNextItemsSnapshot = true;
+    collab.skipNextConnectionsSnapshot = true;
+
+    collab.itemsColRef.onSnapshot(handleItemsSnapshot);
+    collab.connectionsColRef.onSnapshot(handleConnectionsSnapshot);
+  }).catch(function (err) {
+    console.error('Error initializing collaboration', err);
+  });
+}

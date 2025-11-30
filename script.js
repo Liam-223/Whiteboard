@@ -42,9 +42,6 @@ const showUsernamesToggle = document.getElementById('show-usernames-toggle');
 const showCursorsToggle = document.getElementById('show-cursors-toggle');
 const cursorColorInput = document.getElementById('cursor-color-input');
 
-const soundsEnabledToggle = document.getElementById('sounds-enabled-toggle');
-const soundVolumeInput = document.getElementById('sound-volume');
-const soundTestBtn = document.getElementById('sound-test-btn');
 const coordsIndicator = document.getElementById('coords-indicator');
 
 // Drawing tools
@@ -75,65 +72,6 @@ const MAX_SCALE = 3;
 
 const STORAGE_BOARD_KEY = 'simple_whiteboard_v16_board';
 const STORAGE_SETTINGS_KEY = 'simple_whiteboard_v16_settings';
-
-// --- Sound settings ---
-const DEFAULT_SOUND_VOLUME = 0.7;
-
-const soundSettings = {
-  enabled: true,
-  volume: DEFAULT_SOUND_VOLUME
-};
-
-const soundCache = {};
-
-function clamp01(v) {
-  return Math.max(0, Math.min(1, v));
-}
-
-function getEffectiveSoundVolume() {
-  if (!soundVolumeInput) return soundSettings.volume;
-  const raw = Number(soundVolumeInput.value);
-  if (!isFinite(raw)) return soundSettings.volume;
-  return clamp01(raw / 100);
-}
-
-function syncSoundControlsFromSettings(settings) {
-  const enabled =
-    typeof settings.soundsEnabled === 'boolean' ? settings.soundsEnabled : true;
-  const volume =
-    typeof settings.soundVolume === 'number'
-      ? clamp01(settings.soundVolume)
-      : DEFAULT_SOUND_VOLUME;
-
-  soundSettings.enabled = enabled;
-  soundSettings.volume = volume;
-
-  if (soundsEnabledToggle) soundsEnabledToggle.checked = enabled;
-  if (soundVolumeInput) soundVolumeInput.value = Math.round(volume * 100);
-}
-
-function loadUiSound(name) {
-  if (!soundCache[name]) {
-    const audio = new Audio(`sounds/${name}.wav`);
-    audio.preload = 'auto';
-    soundCache[name] = audio;
-  }
-  // use a clone so multiple sounds can overlap
-  return soundCache[name].cloneNode();
-}
-
-function playUiSound(name) {
-  if (!soundSettings.enabled) return;
-  try {
-    const audio = loadUiSound(name);
-    const vol = getEffectiveSoundVolume();
-    audio.volume = clamp01(vol);
-    audio.play().catch(() => {});
-  } catch (err) {
-    // best-effort only – ignore sound errors
-  }
-}
-
 
 let nextItemId = 1;
 let connections = []; // { fromId, toId }
@@ -282,7 +220,6 @@ addNoteBtn.addEventListener('click', () => {
   board.appendChild(note);
   refreshConnections();
   autoSaveToLocalStorage();
-  playUiSound('ui-pop');
 });
 
 // New voice note
@@ -300,7 +237,6 @@ if (addVoiceBtn) {
     board.appendChild(voiceItem);
     refreshConnections();
     autoSaveToLocalStorage();
-    playUiSound('ui-pop');
   });
 }
 
@@ -323,7 +259,6 @@ imageUpload.addEventListener('change', (event) => {
     board.appendChild(imgWrapper);
     refreshConnections();
     autoSaveToLocalStorage();
-    playUiSound('ui-pop');
     imageUpload.value = '';
   };
 
@@ -499,7 +434,6 @@ function createNote({ id, x, y, title, text, color, width, height }) {
     note.remove();
     refreshConnections();
     autoSaveToLocalStorage();
-    playUiSound('ui-delete');
   });
 
   header.appendChild(colorPicker);
@@ -650,7 +584,6 @@ function createVoiceItem({ id, x, y, width, height, audioData }) {
     voice.remove();
     refreshConnections();
     autoSaveToLocalStorage();
-    playUiSound('ui-delete');
   });
 
   header.appendChild(icon);
@@ -1177,7 +1110,6 @@ clearBoardBtn.addEventListener('click', () => {
 
   refreshConnections();
   autoSaveToLocalStorage();
-  playUiSound('ui-delete');
 });
 
 // ------------------------------------------------------
@@ -1624,14 +1556,6 @@ function applySavedSettings() {
     typeof settings.showCursors === 'boolean' ? settings.showCursors : true;
   const cursorColor = settings.cursorColor || '#f97316';
   const username = settings.username || '';
-  // sound settings
-  const soundsEnabled =
-    typeof settings.soundsEnabled === 'boolean' ? settings.soundsEnabled : true;
-  const soundVolume =
-    typeof settings.soundVolume === 'number'
-      ? clamp01(settings.soundVolume)
-      : DEFAULT_SOUND_VOLUME;
-
 
   document.body.classList.toggle('dark', dark);
   board.classList.toggle('no-grid', !showGrid);
@@ -1650,18 +1574,6 @@ function applySavedSettings() {
   if (username) {
     userIdentity.name = username;
   }
-
-  // sync sound controls & in-memory state
-  syncSoundControlsFromSettings({
-    darkMode: dark,
-    showGrid,
-    showUsernames,
-    showCursors,
-    cursorColor,
-    username,
-    soundsEnabled,
-    soundVolume
-  });
 }
 
 function getCurrentSettings() {
@@ -1671,9 +1583,8 @@ function getCurrentSettings() {
     showUsernames: !!(showUsernamesToggle && showUsernamesToggle.checked),
     showCursors: !!(showCursorsToggle && showCursorsToggle.checked),
     cursorColor: cursorColorInput ? cursorColorInput.value : '#f97316',
-    username: usernameInput ? usernameInput.value.trim() : (userIdentity.name || ''),
-    soundsEnabled: !!(soundsEnabledToggle && soundsEnabledToggle.checked),
-    soundVolume: getEffectiveSoundVolume()
+    username:
+      usernameInput ? usernameInput.value.trim() : (userIdentity.name || '')
   };
 }
 
@@ -1733,51 +1644,15 @@ if (darkModeToggle) {
     const enabled = darkModeToggle.checked;
     document.body.classList.toggle('dark', enabled);
     saveSettings(getCurrentSettings());
-    if (enabled) {
-      playUiSound('ui-click');
-    }
   });
 }
-
 if (gridToggle) {
   gridToggle.addEventListener('change', () => {
     const enabled = gridToggle.checked;
     board.classList.toggle('no-grid', !enabled);
     saveSettings(getCurrentSettings());
-    playUiSound('ui-click');
   });
 }
-
-if (soundsEnabledToggle) {
-  soundsEnabledToggle.addEventListener('change', () => {
-    soundSettings.enabled = !!soundsEnabledToggle.checked;
-    saveSettings(getCurrentSettings());
-    if (soundSettings.enabled) {
-      playUiSound('ui-click');
-    }
-  });
-}
-
-if (soundVolumeInput) {
-  soundVolumeInput.addEventListener('input', () => {
-    soundSettings.volume = getEffectiveSoundVolume();
-  });
-
-  soundVolumeInput.addEventListener('change', () => {
-    soundSettings.volume = getEffectiveSoundVolume();
-    saveSettings(getCurrentSettings());
-    if (soundSettings.enabled) {
-      playUiSound('ui-click');
-    }
-  });
-}
-
-if (soundTestBtn) {
-  soundTestBtn.addEventListener('click', () => {
-    playUiSound('ui-pop');
-  });
-}
-
 if (resetZoomBtn) {
   resetZoomBtn.addEventListener('click', () => {
     scale = 1;

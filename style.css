@@ -814,11 +814,6 @@ body.dark .context-menu button:hover {
 }
 
 
-/* Sound settings */
-.setting-item input[type="range"]#sound-volume {
-  flex: 1;
-}
-
 /* Settings modal animation & tabs */
 @keyframes settingsPopIn {
   0% {

@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="style.css" />
 
-  <!-- firebase stuff for multiplayer, (i still hate google) -->
+  <!-- Firebase stuff for multiplayer, i still hate google -->
   <!-- remove these two lines == no realtime sync -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -55,20 +55,28 @@
       <button id="settings-toggle-btn" class="secondary-btn">⚙ Settings</button>
     </div>
 
-    <div class="settings-panel" id="settings-panel">
+        <div class="settings-panel" id="settings-panel">
       <div class="settings-modal">
         <div class="settings-modal-header">
           <h2>⚙ Settings</h2>
           <button id="settings-close-btn" class="settings-close-btn" type="button">✕</button>
         </div>
 
-        <div class="settings-topbar">
-          <button class="settings-tab active" type="button" data-settings-tab="board">Board</button>
-          <button class="settings-tab" type="button" data-settings-tab="user">User</button>
+        <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+          <button class="settings-tab active" type="button" data-tab="board" aria-selected="true">
+            Board
+          </button>
+          <button class="settings-tab" type="button" data-tab="user" aria-selected="false">
+            Me
+          </button>
         </div>
 
-        <div class="settings-body">
-          <div class="settings-section active" data-settings-panel="board">
+        <div class="settings-content">
+          <div
+            class="settings-section settings-section-board active"
+            data-tab-panel="board"
+            role="tabpanel"
+          >
             <div class="settings-section-title">Board settings</div>
             <label class="setting-item">
               <input type="checkbox" id="grid-toggle" checked />
@@ -77,7 +85,12 @@
             <button id="reset-zoom-btn" class="secondary-btn" type="button">Reset zoom</button>
           </div>
 
-          <div class="settings-section" data-settings-panel="user">
+          <div
+            class="settings-section settings-section-user"
+            data-tab-panel="user"
+            role="tabpanel"
+            hidden
+          >
             <div class="settings-section-title">My settings</div>
             <label class="setting-item">
               <input type="checkbox" id="dark-mode-toggle" checked />
@@ -103,7 +116,8 @@
         </div>
       </div>
     </div>
-    <div class="info-panel">
+
+<div class="info-panel">
       <div class="info-title">Share this board</div>
       <div class="info-text">
         Anyone with the link can view & edit your board.

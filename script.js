@@ -41,10 +41,11 @@ const usernameInput = document.getElementById('username-input');
 const showUsernamesToggle = document.getElementById('show-usernames-toggle');
 const showCursorsToggle = document.getElementById('show-cursors-toggle');
 const cursorColorInput = document.getElementById('cursor-color-input');
-const coordsIndicator = document.getElementById('coords-indicator');
-const settingsTabs = document.querySelectorAll('.settings-tab');
-const settingsSections = document.querySelectorAll('.settings-section[data-settings-panel]');
 
+const soundsEnabledToggle = document.getElementById('sounds-enabled-toggle');
+const soundVolumeInput = document.getElementById('sound-volume');
+const soundTestBtn = document.getElementById('sound-test-btn');
+const coordsIndicator = document.getElementById('coords-indicator');
 
 // Drawing tools
 const drawModeBtn = document.getElementById('draw-mode-btn');
@@ -74,6 +75,65 @@ const MAX_SCALE = 3;
 
 const STORAGE_BOARD_KEY = 'simple_whiteboard_v16_board';
 const STORAGE_SETTINGS_KEY = 'simple_whiteboard_v16_settings';
+
+// --- Sound settings ---
+const DEFAULT_SOUND_VOLUME = 0.7;
+
+const soundSettings = {
+  enabled: true,
+  volume: DEFAULT_SOUND_VOLUME
+};
+
+const soundCache = {};
+
+function clamp01(v) {
+  return Math.max(0, Math.min(1, v));
+}
+
+function getEffectiveSoundVolume() {
+  if (!soundVolumeInput) return soundSettings.volume;
+  const raw = Number(soundVolumeInput.value);
+  if (!isFinite(raw)) return soundSettings.volume;
+  return clamp01(raw / 100);
+}
+
+function syncSoundControlsFromSettings(settings) {
+  const enabled =
+    typeof settings.soundsEnabled === 'boolean' ? settings.soundsEnabled : true;
+  const volume =
+    typeof settings.soundVolume === 'number'
+      ? clamp01(settings.soundVolume)
+      : DEFAULT_SOUND_VOLUME;
+
+  soundSettings.enabled = enabled;
+  soundSettings.volume = volume;
+
+  if (soundsEnabledToggle) soundsEnabledToggle.checked = enabled;
+  if (soundVolumeInput) soundVolumeInput.value = Math.round(volume * 100);
+}
+
+function loadUiSound(name) {
+  if (!soundCache[name]) {
+    const audio = new Audio(`sounds/${name}.wav`);
+    audio.preload = 'auto';
+    soundCache[name] = audio;
+  }
+  // use a clone so multiple sounds can overlap
+  return soundCache[name].cloneNode();
+}
+
+function playUiSound(name) {
+  if (!soundSettings.enabled) return;
+  try {
+    const audio = loadUiSound(name);
+    const vol = getEffectiveSoundVolume();
+    audio.volume = clamp01(vol);
+    audio.play().catch(() => {});
+  } catch (err) {
+    // best-effort only – ignore sound errors
+  }
+}
+
 
 let nextItemId = 1;
 let connections = []; // { fromId, toId }
@@ -222,6 +282,7 @@ addNoteBtn.addEventListener('click', () => {
   board.appendChild(note);
   refreshConnections();
   autoSaveToLocalStorage();
+  playUiSound('ui-pop');
 });
 
 // New voice note
@@ -239,6 +300,7 @@ if (addVoiceBtn) {
     board.appendChild(voiceItem);
     refreshConnections();
     autoSaveToLocalStorage();
+    playUiSound('ui-pop');
   });
 }
 
@@ -261,6 +323,7 @@ imageUpload.addEventListener('change', (event) => {
     board.appendChild(imgWrapper);
     refreshConnections();
     autoSaveToLocalStorage();
+    playUiSound('ui-pop');
     imageUpload.value = '';
   };
 
@@ -404,7 +467,7 @@ function createNote({ id, x, y, title, text, color, width, height }) {
   const colorPicker = document.createElement('div');
   colorPicker.className = 'note-color-picker';
 
-  const colors = ['yellow', 'blue', 'green', 'pink'];
+  const colors = ['yellow', 'blue', 'green', 'pink', 'orange', 'purple'];
   colors.forEach((c) => {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -424,18 +487,6 @@ function createNote({ id, x, y, title, text, color, width, height }) {
     colorPicker.appendChild(btn);
   });
 
-  const customColorInput = document.createElement('input');
-  customColorInput.type = 'color';
-  customColorInput.className = 'note-color-custom';
-  customColorInput.value = resolveNoteColorValue(note.dataset.color);
-  customColorInput.addEventListener('input', (e) => {
-    e.stopPropagation();
-    const hex = e.target.value || '#fef9c3';
-    setNoteColor(note, hex);
-    autoSaveToLocalStorage();
-  });
-  colorPicker.appendChild(customColorInput);
-
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'note-delete-btn';
   deleteBtn.innerText = '✕';
@@ -448,6 +499,7 @@ function createNote({ id, x, y, title, text, color, width, height }) {
     note.remove();
     refreshConnections();
     autoSaveToLocalStorage();
+    playUiSound('ui-delete');
   });
 
   header.appendChild(colorPicker);
@@ -489,11 +541,6 @@ function setNoteColor(note, color) {
   dots.forEach((dot) => {
     dot.classList.toggle('active', dot.dataset.color === color);
   });
-
-  const customInput = note.querySelector('.note-color-custom');
-  if (customInput) {
-    customInput.value = resolved;
-  }
 }
 
 
@@ -507,6 +554,10 @@ function resolveNoteColorValue(color) {
       return '#dcfce7';
     case 'pink':
       return '#fce7f3';
+    case 'orange':
+      return '#ffedd5';
+    case 'purple':
+      return '#ede9fe';
     default:
       if (typeof color === 'string' && color.startsWith('#')) {
         return color;
@@ -599,6 +650,7 @@ function createVoiceItem({ id, x, y, width, height, audioData }) {
     voice.remove();
     refreshConnections();
     autoSaveToLocalStorage();
+    playUiSound('ui-delete');
   });
 
   header.appendChild(icon);
@@ -814,11 +866,12 @@ function openContextMenu(x, y, itemId) {
 
   const fromEl = board.querySelector(`[data-item-id="${itemId}"]`);
 
+  // Start / target connection button
   const btnStart = document.createElement('button');
   btnStart.textContent =
     pendingConnectionFromId && pendingConnectionFromId !== itemId
       ? 'Use as connection target'
-      : 'Start connection from here';
+      : 'Connect notes';
 
   btnStart.addEventListener('click', () => {
     if (!pendingConnectionFromId) {
@@ -840,6 +893,71 @@ function openContextMenu(x, y, itemId) {
   });
 
   contextMenu.appendChild(btnStart);
+
+  // Duplicate item (notes, images & voice notes)
+  if (fromEl && (fromEl.classList.contains('note') || fromEl.classList.contains('image-item') || fromEl.classList.contains('voice-item'))) {
+    const btnDuplicate = document.createElement('button');
+    btnDuplicate.textContent = 'Duplicate';
+    btnDuplicate.addEventListener('click', () => {
+      const x = parseInt(fromEl.style.left, 10) || 0;
+      const y = parseInt(fromEl.style.top, 10) || 0;
+      const width = fromEl.offsetWidth;
+      const height = fromEl.offsetHeight;
+
+      let duplicate = null;
+
+      if (fromEl.classList.contains('note')) {
+        const titleInput = fromEl.querySelector('.note-title');
+        const textarea = fromEl.querySelector('textarea');
+        const color = fromEl.dataset.color || 'yellow';
+
+        duplicate = createNote({
+          id: generateItemId(),
+          x: x + 30,
+          y: y + 30,
+          title: titleInput ? titleInput.value : '',
+          text: textarea ? textarea.value : '',
+          color,
+          width,
+          height
+        });
+      } else if (fromEl.classList.contains('image-item')) {
+        const img = fromEl.querySelector('img');
+        const src = img ? img.src : '';
+
+        duplicate = createImageItem({
+          id: generateItemId(),
+          x: x + 30,
+          y: y + 30,
+          src,
+          width,
+          height
+        });
+      } else if (fromEl.classList.contains('voice-item')) {
+        const audioData = fromEl.dataset.audioData || null;
+
+        duplicate = createVoiceItem({
+          id: generateItemId(),
+          x: x + 30,
+          y: y + 30,
+          width,
+          height,
+          audioData
+        });
+      }
+
+      if (duplicate) {
+        board.appendChild(duplicate);
+        refreshConnections();
+        autoSaveToLocalStorage();
+      }
+
+      closeContextMenu();
+    });
+
+    contextMenu.appendChild(btnDuplicate);
+  }
+
   contextMenu.style.left = x + 'px';
   contextMenu.style.top = y + 'px';
   contextMenu.classList.add('open');
@@ -1059,6 +1177,7 @@ clearBoardBtn.addEventListener('click', () => {
 
   refreshConnections();
   autoSaveToLocalStorage();
+  playUiSound('ui-delete');
 });
 
 // ------------------------------------------------------
@@ -1505,6 +1624,14 @@ function applySavedSettings() {
     typeof settings.showCursors === 'boolean' ? settings.showCursors : true;
   const cursorColor = settings.cursorColor || '#f97316';
   const username = settings.username || '';
+  // sound settings
+  const soundsEnabled =
+    typeof settings.soundsEnabled === 'boolean' ? settings.soundsEnabled : true;
+  const soundVolume =
+    typeof settings.soundVolume === 'number'
+      ? clamp01(settings.soundVolume)
+      : DEFAULT_SOUND_VOLUME;
+
 
   document.body.classList.toggle('dark', dark);
   board.classList.toggle('no-grid', !showGrid);
@@ -1523,6 +1650,18 @@ function applySavedSettings() {
   if (username) {
     userIdentity.name = username;
   }
+
+  // sync sound controls & in-memory state
+  syncSoundControlsFromSettings({
+    darkMode: dark,
+    showGrid,
+    showUsernames,
+    showCursors,
+    cursorColor,
+    username,
+    soundsEnabled,
+    soundVolume
+  });
 }
 
 function getCurrentSettings() {
@@ -1532,7 +1671,9 @@ function getCurrentSettings() {
     showUsernames: !!(showUsernamesToggle && showUsernamesToggle.checked),
     showCursors: !!(showCursorsToggle && showCursorsToggle.checked),
     cursorColor: cursorColorInput ? cursorColorInput.value : '#f97316',
-    username: usernameInput ? usernameInput.value.trim() : (userIdentity.name || '')
+    username: usernameInput ? usernameInput.value.trim() : (userIdentity.name || ''),
+    soundsEnabled: !!(soundsEnabledToggle && soundsEnabledToggle.checked),
+    soundVolume: getEffectiveSoundVolume()
   };
 }
 
@@ -1592,6 +1733,9 @@ if (darkModeToggle) {
     const enabled = darkModeToggle.checked;
     document.body.classList.toggle('dark', enabled);
     saveSettings(getCurrentSettings());
+    if (enabled) {
+      playUiSound('ui-click');
+    }
   });
 }
 
@@ -1600,6 +1744,37 @@ if (gridToggle) {
     const enabled = gridToggle.checked;
     board.classList.toggle('no-grid', !enabled);
     saveSettings(getCurrentSettings());
+    playUiSound('ui-click');
+  });
+}
+
+if (soundsEnabledToggle) {
+  soundsEnabledToggle.addEventListener('change', () => {
+    soundSettings.enabled = !!soundsEnabledToggle.checked;
+    saveSettings(getCurrentSettings());
+    if (soundSettings.enabled) {
+      playUiSound('ui-click');
+    }
+  });
+}
+
+if (soundVolumeInput) {
+  soundVolumeInput.addEventListener('input', () => {
+    soundSettings.volume = getEffectiveSoundVolume();
+  });
+
+  soundVolumeInput.addEventListener('change', () => {
+    soundSettings.volume = getEffectiveSoundVolume();
+    saveSettings(getCurrentSettings());
+    if (soundSettings.enabled) {
+      playUiSound('ui-click');
+    }
+  });
+}
+
+if (soundTestBtn) {
+  soundTestBtn.addEventListener('click', () => {
+    playUiSound('ui-pop');
   });
 }
 
@@ -1617,24 +1792,9 @@ if (resetZoomBtn) {
   });
 }
 
-function setActiveSettingsTab(tabName) {
-  if (!settingsTabs || !settingsSections) return;
-
-  settingsTabs.forEach((tab) => {
-    const isActive = tab.dataset.settingsTab === tabName;
-    tab.classList.toggle('active', isActive);
-  });
-
-  settingsSections.forEach((section) => {
-    const isActive = section.dataset.settingsPanel === tabName;
-    section.classList.toggle('active', isActive);
-  });
-}
-
 function openSettingsModal() {
   if (!settingsPanel) return;
   settingsPanel.classList.add('open');
-  setActiveSettingsTab('board');
   if (settingsToggleBtn) {
     settingsToggleBtn.classList.add('active');
   }
@@ -1662,20 +1822,6 @@ if (settingsCloseBtn) {
   settingsCloseBtn.addEventListener('click', () => {
     closeSettingsModal();
   });
-}
-
-if (settingsTabs && settingsTabs.length && settingsSections && settingsSections.length) {
-  settingsTabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
-      const tabName = tab.dataset.settingsTab;
-      if (tabName) {
-        setActiveSettingsTab(tabName);
-      }
-    });
-  });
-
-  // initial state
-  setActiveSettingsTab('board');
 }
 
 if (showUsernamesToggle) {
@@ -1748,7 +1894,7 @@ document.addEventListener('mouseleave', () => {
   hideOwnCursorRemotely();
 });
 // ------------------------------------------------------
-// connections (on SVG layer)
+// Connections (SVG layer)
 // ------------------------------------------------------
 function refreshConnections() {
   if (!connectionsLayer) return;
@@ -1946,3 +2092,61 @@ function endDrawing() {
 
 drawLayer.addEventListener('mouseup', endDrawing);
 drawLayer.addEventListener('mouseleave', endDrawing);
+
+// ------------------------------------------------------
+// Settings modal tabs (Board vs User)
+// ------------------------------------------------------
+(function initSettingsTabs() {
+  const panel = document.getElementById('settings-panel');
+  if (!panel) return;
+
+  const tabButtons = Array.from(panel.querySelectorAll('.settings-tab'));
+  const tabPanels = Array.from(panel.querySelectorAll('[data-tab-panel]'));
+  if (!tabButtons.length || !tabPanels.length) return;
+
+  function setActiveSettingsTab(tabName) {
+    const name = tabName || 'board';
+
+    tabButtons.forEach((btn) => {
+      const isActive = btn.dataset.tab === name;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      btn.setAttribute('tabindex', isActive ? '0' : '-1');
+    });
+
+    tabPanels.forEach((panelEl) => {
+      const isActive = panelEl.dataset.tabPanel === name;
+      panelEl.classList.toggle('active', isActive);
+      if (isActive) {
+        panelEl.removeAttribute('hidden');
+      } else {
+        panelEl.setAttribute('hidden', 'hidden');
+      }
+    });
+  }
+
+  let storedTab = 'board';
+  try {
+    if (window.localStorage) {
+      storedTab = window.localStorage.getItem('whiteboard.settingsTab') || 'board';
+    }
+  } catch (err) {
+    storedTab = 'board';
+  }
+
+  setActiveSettingsTab(storedTab);
+
+  tabButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab || 'board';
+      setActiveSettingsTab(tab);
+      try {
+        if (window.localStorage) {
+          window.localStorage.setItem('whiteboard.settingsTab', tab);
+        }
+      } catch (err) {
+        // ignore
+      }
+    });
+  });
+})();

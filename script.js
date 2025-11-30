@@ -162,14 +162,10 @@ let collab = {
   enabled: false,
   db: null,
   boardDocRef: null,
-  itemsColRef: null,
   boardId: null,
   lastLocalUpdate: 0,
   isApplyingRemote: false
 };
-
-const knownItemIds = new Set();
-
 
 let currentShareLink = '';
 let shareLinkVisible = false;
@@ -1060,12 +1056,18 @@ function clearBoardElements() {
   toRemove.forEach((el) => el.remove());
 }
 
-
 function loadBoardFromData(data) {
-  if (data && Object.prototype.hasOwnProperty.call(data, 'drawing')) {
-    applyDrawingFromData(data.drawing);
-  } else {
-    applyDrawingFromData(null);
+  if (drawCtx) {
+    drawCtx.clearRect(0, 0, drawLayer.width, drawLayer.height);
+
+    if (data && data.drawing) {
+      const img = new Image();
+      img.onload = () => {
+        drawCtx.clearRect(0, 0, drawLayer.width, drawLayer.height);
+        drawCtx.drawImage(img, 0, 0, drawLayer.width, drawLayer.height);
+      };
+      img.src = data.drawing;
+    }
   }
 
   clearBoardElements();
@@ -1093,8 +1095,6 @@ function loadBoardFromData(data) {
 
   refreshNextItemId();
   refreshConnections();
-}
-
 }
 
 function autoSaveToLocalStorage() {
@@ -1180,57 +1180,9 @@ clearBoardBtn.addEventListener('click', () => {
   playUiSound('ui-delete');
 });
 
-
 // ------------------------------------------------------
-// Firebase collab (per-item documents)
+// Firebase collab
 // ------------------------------------------------------
-function createItemElementFromData(item) {
-  if (!item || !item.type) return null;
-
-  if (item.type === 'note') {
-    return createNote(item);
-  }
-  if (item.type === 'image') {
-    return createImageItem(item);
-  }
-  if (item.type === 'voice') {
-    return createVoiceItem(item);
-  }
-
-  return null;
-}
-
-function findItemElementById(id) {
-  if (!id) return null;
-  return board.querySelector('[data-item-id="' + id + '"]');
-}
-
-function upsertItemFromRemote(item) {
-  if (!item || !item.id) return;
-
-  // Track known IDs so we can detect deletions when pushing
-  knownItemIds.add(item.id);
-
-  const existing = findItemElementById(item.id);
-  if (existing) {
-    existing.remove();
-  }
-
-  const el = createItemElementFromData(item);
-  if (el) {
-    board.appendChild(el);
-  }
-}
-
-function removeItemById(id) {
-  if (!id) return;
-  const el = findItemElementById(id);
-  if (el) {
-    el.remove();
-  }
-  knownItemIds.delete(id);
-}
-
 function initFirebaseCollaboration() {
   if (typeof firebase === 'undefined' || !window.FIREBASE_CONFIG || !window.FIREBASE_CONFIG.projectId) {
     console.warn('Firebase not configured – realtime collaboration disabled.');
@@ -1253,7 +1205,6 @@ function initFirebaseCollaboration() {
   collab.boardId = boardId;
   updateShareLink(boardId);
 
-  // Share link UI
   if (copyLinkBtn && shareLinkEl) {
     copyLinkBtn.addEventListener('click', async () => {
       try {
@@ -1282,193 +1233,62 @@ function initFirebaseCollaboration() {
     });
   }
 
-  const boardDocRef = db.collection('boards').doc(boardId);
-  const itemsColRef = boardDocRef.collection('items');
-  collab.boardDocRef = boardDocRef;
-  collab.itemsColRef = itemsColRef;
+  const docRef = db.collection('boards').doc(boardId);
+  collab.boardDocRef = docRef;
 
   // live cursors / presence
   initLiveCursorCollaboration();
 
-  // Load existing remote state and, if none, seed from local board
-  Promise.all([boardDocRef.get(), itemsColRef.get()])
-    .then(([boardSnap, itemsSnap]) => {
-      const hasRemoteBoard = boardSnap.exists || !itemsSnap.empty;
+  // load remote board (if that exists) then start listening
+  docRef.get().then((snap) => {
+    const remoteData = snap.data();
+    if (remoteData && remoteData.board) {
+      collab.isApplyingRemote = true;
+      loadBoardFromData(remoteData.board);
+      collab.isApplyingRemote = false;
+    } else {
+      // no remote board yet == push our current state
+      pushBoardToFirestore();
+    }
 
-      if (!hasRemoteBoard) {
-        // No remote board yet – push our current state as the initial snapshot
-        let boardData = null;
-        const raw = localStorage.getItem(STORAGE_BOARD_KEY);
-        if (raw) {
-          try {
-            boardData = JSON.parse(raw);
-          } catch (err) {
-            console.error('Error parsing local board JSON for seeding', err);
-          }
-        }
-        if (!boardData) {
-          boardData = serializeBoard();
-        }
+    collab.enabled = true;
+    collab.lastLocalUpdate = Date.now();
 
-        const batch = db.batch();
-        const items = Array.isArray(boardData.items) ? boardData.items : [];
+    docRef.onSnapshot((snapshot) => {
+      const data = snapshot.data();
+      if (!data || !data.board) return;
 
-        items.forEach((item) => {
-          if (!item.id) {
-            item.id = generateItemId();
-          }
-          knownItemIds.add(item.id);
-          const docRef = itemsColRef.doc(item.id);
-          batch.set(docRef, item);
-        });
-
-        batch.set(
-          boardDocRef,
-          {
-            connections: Array.isArray(boardData.connections)
-              ? boardData.connections
-              : [],
-            drawing: boardData.drawing || null,
-            updatedAt: Date.now()
-          },
-          { merge: true }
-        );
-
-        return batch.commit();
-      } else {
-        // Apply remote state as the source of truth
-        const boardData = boardSnap.data() || {};
-
-        if (Object.prototype.hasOwnProperty.call(boardData, 'drawing')) {
-          applyDrawingFromData(boardData.drawing);
-        } else {
-          applyDrawingFromData(null);
-        }
-
-        connections = Array.isArray(boardData.connections)
-          ? boardData.connections
-          : [];
-
-        clearBoardElements();
-
-        itemsSnap.forEach((doc) => {
-          const item = doc.data() || {};
-          if (!item.id) {
-            item.id = doc.id;
-          }
-          upsertItemFromRemote(item);
-        });
-
-        refreshNextItemId();
-        refreshConnections();
+      if (data.updatedAt && data.updatedAt <= collab.lastLocalUpdate) {
+        return;
       }
-    })
-    .then(() => {
-      collab.enabled = true;
 
-      // Listen for meta changes (connections + drawing)
-      collab.boardDocRef.onSnapshot((snapshot) => {
-        const data = snapshot.data();
-        if (!data) return;
-
-        if (data.updatedAt && data.updatedAt <= collab.lastLocalUpdate) {
-          // This is our own update, ignore to avoid echo
-          return;
-        }
-
-        collab.isApplyingRemote = true;
-
-        if (Object.prototype.hasOwnProperty.call(data, 'drawing')) {
-          applyDrawingFromData(data.drawing);
-        }
-
-        if (Array.isArray(data.connections)) {
-          connections = data.connections;
-          refreshConnections();
-        }
-
-        collab.isApplyingRemote = false;
-      });
-
-      // Listen for per-item changes
-      collab.itemsColRef.onSnapshot((snapshot) => {
-        collab.isApplyingRemote = true;
-
-        snapshot.docChanges().forEach((change) => {
-          const doc = change.doc;
-          const item = doc.data() || {};
-          if (!item.id) {
-            item.id = doc.id;
-          }
-
-          if (change.type === 'removed') {
-            removeItemById(item.id);
-          } else {
-            upsertItemFromRemote(item);
-          }
-        });
-
-        refreshNextItemId();
-        refreshConnections();
-        collab.isApplyingRemote = false;
-      });
-    })
-    .catch((err) => {
-      console.error('Error initializing collaboration', err);
+      collab.isApplyingRemote = true;
+      loadBoardFromData(data.board);
+      collab.isApplyingRemote = false;
     });
+  }).catch((err) => {
+    console.error('Error initializing collaboration', err);
+  });
 }
 
 function pushBoardToFirestore() {
-  if (!collab.boardDocRef || !collab.itemsColRef || !collab.db || collab.isApplyingRemote) return;
+  if (!collab.boardDocRef || collab.isApplyingRemote) return;
 
   const now = Date.now();
   collab.lastLocalUpdate = now;
-
   const boardData = serializeBoard();
-  const items = Array.isArray(boardData.items) ? boardData.items : [];
-  const currentIds = new Set();
 
-  const batch = collab.db.batch();
-
-  items.forEach((item) => {
-    if (!item.id) {
-      item.id = generateItemId();
-    }
-    currentIds.add(item.id);
-    knownItemIds.add(item.id);
-
-    const docRef = collab.itemsColRef.doc(item.id);
-    batch.set(docRef, item, { merge: true });
-  });
-
-  // Delete items that no longer exist locally
-  knownItemIds.forEach((id) => {
-    if (!currentIds.has(id)) {
-      const docRef = collab.itemsColRef.doc(id);
-      batch.delete(docRef);
-    }
-  });
-
-  // After this push, the currentIds set becomes the new known set.
-  knownItemIds.clear();
-  currentIds.forEach((id) => knownItemIds.add(id));
-
-  batch.set(
-    collab.boardDocRef,
+  collab.boardDocRef.set(
     {
-      connections: Array.isArray(boardData.connections)
-        ? boardData.connections
-        : [],
-      drawing: boardData.drawing || null,
+      board: boardData,
       updatedAt: now
     },
     { merge: true }
-  );
-
-  batch.commit().catch((err) => {
+  ).catch((err) => {
     console.error('Firestore write error', err);
   });
 }
+
 
 // ------------------------------------------------------
 // Live cursor presence (Firebase sub-collection)
